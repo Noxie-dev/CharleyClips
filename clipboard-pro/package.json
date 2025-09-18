@@ -1,0 +1,35 @@
+{
+  "name": "clipboard-history-pro",
+  "version": "1.0.0",
+  "description": "A powerful, local-first clipboard manager designed to help you keep a record of everything you copy.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:headless": "electron . --headless",
+    "cli": "node cli.js",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "bin": {
+    "clipboard-history": "./cli.js"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "electron": "^38.1.2",
+    "electron-store": "^8.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.6.3",
+    "vite": "^7.1.6"
+  }
+}

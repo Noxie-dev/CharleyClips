@@ -66,30 +66,135 @@ class ClipboardManager {
         this.searchQuery = '';
         this.isSelecting = false;
         this.selectedItems = new Set();
+        // Viewer state
+        this.viewer = { open: false, itemId: null, editing: false };
         this.init();
     }
     init() {
-        this.loadFromStorage();
+        // Load initial data from Electron main via preload bridge
+        if (window.electronAPI && typeof window.electronAPI.onInitialData === 'function') {
+            window.electronAPI.onInitialData((_event, payload) => {
+                try {
+                    const { history = [], settings = {} } = payload || {};
+                    if (settings && typeof settings === 'object') {
+                        this.applySettings(settings);
+                    }
+                    this.loadFromArray(history);
+                    this.render();
+                } catch (err) {
+                    console.error('Failed handling initial-data:', err);
+                }
+            });
+        } else {
+            // Fallback for browser environment: keep existing localStorage behavior
+            this.loadFromLocalStorage();
+        }
+
+        // Subscribe to clipboard updates from main process polling
+        if (window.electronAPI && typeof window.electronAPI.onUpdateClipboard === 'function') {
+            window.electronAPI.onUpdateClipboard((_event, payload) => {
+                const text = payload && payload.text;
+                if (typeof text === 'string' && text.length > 0) {
+                    this.processItem(text);
+                }
+            });
+        }
+        // Listen for settings updates from main
+        if (window.electronAPI && typeof window.electronAPI.onSettingsUpdated === 'function') {
+            window.electronAPI.onSettingsUpdated((_event, newSettings) => {
+                this.applySettings(newSettings);
+                this.render();
+            });
+        }
         this.setupEventListeners();
+        this.loadTheme(); // Load saved theme
         this.render();
         feather.replace(); // Initialize icons
     }
-    loadFromStorage() {
+    applySettings(newSettings) {
+        const prevMax = this.settings.maxItems;
+        this.settings = { ...this.settings, ...newSettings };
+        // Resize cache if maxItems changed
+        if (typeof this.settings.maxItems === 'number' && this.settings.maxItems !== prevMax) {
+            this.resizeCache(this.settings.maxItems);
+        }
+    }
+    resizeCache(newCapacity) {
+        const items = this.getFilteredAndSortedItems ? this.lruCache.getAll() : [];
+        const trimmed = items.slice(0, Math.max(1, newCapacity));
+        this.lruCache = new LRUCache(newCapacity);
+        this.trie = new Trie();
+        this.hashMap.clear();
+        trimmed.forEach(item => {
+            this.lruCache.put(item.id, item);
+            const hash = this.hash(item.originalContent);
+            this.hashMap.set(hash, item.id);
+            this.trie.insert(item.originalContent, item.id);
+        });
+        this.persistHistory();
+    }
+    loadFromLocalStorage() {
         const savedItems = JSON.parse(localStorage.getItem('clipboardHistory') || '[]');
-        savedItems.forEach(item => {
+        this.loadFromArray(savedItems);
+    }
+    loadFromArray(itemsArray) {
+        if (!Array.isArray(itemsArray)) return;
+        // Reset structures
+        this.lruCache = new LRUCache(this.settings.maxItems);
+        this.trie = new Trie();
+        this.hashMap.clear();
+        itemsArray.forEach(item => {
+            if (!item || typeof item.originalContent !== 'string') return;
             const hash = this.hash(item.originalContent);
             if (!this.hashMap.has(hash)) {
-                this.lruCache.put(item.id, item);
-                this.hashMap.set(hash, item.id);
-                this.trie.insert(item.originalContent, item.id);
+                // Ensure required fields
+                const normalized = {
+                    id: String(item.id ?? Date.now().toString()),
+                    originalContent: item.originalContent,
+                    type: item.type || ContentClassifier.classify(item.originalContent),
+                    timestamp: item.timestamp || Date.now(),
+                    lastUsed: item.lastUsed || item.timestamp || Date.now(),
+                    frequency: item.frequency || 1,
+                };
+                this.lruCache.put(normalized.id, normalized);
+                this.hashMap.set(hash, normalized.id);
+                this.trie.insert(normalized.originalContent, normalized.id);
             }
         });
+
+        // Viewer modal elements
+        this.viewerModal = document.getElementById('viewerModal');
+        this.viewerCloseBtn = document.getElementById('viewerCloseBtn');
+        this.viewerReadOnly = document.getElementById('viewerReadOnly');
+        this.viewerEditor = document.getElementById('viewerEditor');
+        this.viewerEditBtn = document.getElementById('viewerEditBtn');
+        this.viewerSaveBtn = document.getElementById('viewerSaveBtn');
+        this.viewerRevertBtn = document.getElementById('viewerRevertBtn');
+        this.viewerDeleteBtn = document.getElementById('viewerDeleteBtn');
+
+        if (this.viewerCloseBtn) this.viewerCloseBtn.addEventListener('click', () => this.closeViewer());
+        if (this.viewerModal) this.viewerModal.addEventListener('click', (e) => { if (e.target === this.viewerModal) this.closeViewer(); });
+        if (this.viewerEditBtn) this.viewerEditBtn.addEventListener('click', () => this.enterViewerEdit());
+        if (this.viewerSaveBtn) this.viewerSaveBtn.addEventListener('click', () => this.handleViewerSave());
+        if (this.viewerRevertBtn) this.viewerRevertBtn.addEventListener('click', () => this.handleViewerRevert());
+        if (this.viewerDeleteBtn) this.viewerDeleteBtn.addEventListener('click', () => this.handleViewerDelete());
+        if (this.viewerEditor) this.viewerEditor.addEventListener('input', () => this.onViewerInput());
     }
-    saveToStorage() {
-        localStorage.setItem('clipboardHistory', JSON.stringify(this.lruCache.getAll()));
+    async persistHistory() {
+        const historyArray = this.lruCache.getAll();
+        if (window.electronAPI && typeof window.electronAPI.saveClipboardHistory === 'function') {
+            try {
+                await window.electronAPI.saveClipboardHistory(historyArray);
+            } catch (e) {
+                console.warn('Failed to persist via electron-store, falling back to localStorage', e);
+                localStorage.setItem('clipboardHistory', JSON.stringify(historyArray));
+            }
+        } else {
+            localStorage.setItem('clipboardHistory', JSON.stringify(historyArray));
+        }
         this.updateStats();
     }
-    
+
     hash(str) {
         let hash = 0;
         for (let i = 0; i < str.length; i++) {
@@ -100,7 +205,14 @@ class ClipboardManager {
     }
     async addItemFromPaste() {
         try {
-            const text = await navigator.clipboard.readText();
+            let text = '';
+            if (window.electronAPI && typeof window.electronAPI.readClipboard === 'function') {
+                const res = await window.electronAPI.readClipboard();
+                if (res && res.ok) text = res.text || '';
+                else throw new Error(res && res.error ? res.error : 'readClipboard failed');
+            } else if (navigator.clipboard && navigator.clipboard.readText) {
+                text = await navigator.clipboard.readText();
+            }
             if (!text) return;
             this.processItem(text);
         } catch (err) {
@@ -108,6 +220,7 @@ class ClipboardManager {
             this.showToast('Failed to read clipboard. Please grant permission.', true);
         }
     }
+
     processItem(text) {
         const itemHash = this.hash(text);
         if (this.hashMap.has(itemHash)) {
@@ -133,16 +246,49 @@ class ClipboardManager {
             this.trie.insert(newItem.originalContent, newItem.id);
             this.showToast('Item added to history.');
         }
-        this.saveToStorage();
+        this.persistHistory();
         this.render();
     }
+
     setupEventListeners() {
+        // Add item from manual input
+        const addItemBtn = document.getElementById('addItemBtn');
+        const pasteTextarea = document.getElementById('pasteTextarea');
+        if (addItemBtn) {
+            addItemBtn.addEventListener('click', () => {
+                const content = pasteTextarea?.value?.trim();
+                if (content) {
+                    this.processItem(content);
+                    pasteTextarea.value = '';
+                }
+            });
+        }
+        
+        // Paste from clipboard
         document.getElementById('pasteBtn').addEventListener('click', () => this.addItemFromPaste());
+        
+        // Clear history
         document.getElementById('clearBtn').addEventListener('click', () => this.clearHistory());
-        document.getElementById('searchInput').addEventListener('input', (e) => {
-            this.searchQuery = e.target.value;
-            this.render();
-        });
+        
+        // Theme switching
+        const themeSelect = document.getElementById('themeSelect');
+        if (themeSelect) {
+            themeSelect.addEventListener('change', (e) => {
+                this.setTheme(e.target.value);
+            });
+        }
+        const searchInput = document.getElementById('searchInput');
+        const searchMeta = document.getElementById('searchMeta');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(this._searchDebounceTimer);
+                const val = e.target.value || '';
+                this._searchDebounceTimer = setTimeout(() => {
+                    this.searchQuery = val;
+                    this.render();
+                }, 150);
+            });
+        }
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelector('.filter-btn.active').classList.remove('active');
@@ -158,34 +304,167 @@ class ClipboardManager {
             this.render();
         });
         document.getElementById('copySelectedBtn').addEventListener('click', () => this.copySelected());
+        // Settings UI
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsModal = document.getElementById('settingsModal');
+        const settingsSaveBtn = document.getElementById('settingsSaveBtn');
+        const settingsCancelBtn = document.getElementById('settingsCancelBtn');
+        const settingsCloseBtn = document.getElementById('settingsCloseBtn');
+        const maxItemsInput = document.getElementById('maxItemsInput');
+        const pollingMsInput = document.getElementById('pollingMsInput');
+        const settingsError = document.getElementById('settingsError');
+
+        const openModal = () => {
+            if (!settingsModal) return;
+            // populate current settings
+            if (maxItemsInput) maxItemsInput.value = this.settings.maxItems ?? 100;
+            if (pollingMsInput) pollingMsInput.value = this.settings.pollingMs ?? 1500;
+            if (settingsError) settingsError.classList.add('hidden');
+            settingsModal.classList.remove('hidden');
+            // Ensure feather icons render inside the modal (in case they weren't processed yet)
+            if (typeof feather !== 'undefined' && feather.replace) {
+                try { feather.replace(); } catch (_) {}
+            }
+        };
+        const closeModal = () => {
+            if (!settingsModal) return;
+            settingsModal.classList.add('hidden');
+        };
+        if (settingsBtn) settingsBtn.addEventListener('click', openModal);
+        if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', (e) => { e.preventDefault?.(); closeModal(); });
+        if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', (e) => { e.preventDefault?.(); closeModal(); });
+        if (settingsModal) settingsModal.addEventListener('click', (e) => {
+            if (e.target === settingsModal) closeModal();
+        });
+        if (settingsSaveBtn) settingsSaveBtn.addEventListener('click', async () => {
+            const maxItems = Number(maxItemsInput?.value ?? this.settings.maxItems);
+            const pollingMs = Number(pollingMsInput?.value ?? this.settings.pollingMs ?? 1500);
+            const errors = [];
+            if (!Number.isFinite(maxItems) || maxItems < 1 || maxItems > 10000) errors.push('Max items must be between 1 and 10000.');
+            if (!Number.isFinite(pollingMs) || pollingMs < 200) errors.push('Polling interval must be at least 200ms.');
+            if (errors.length) {
+                if (settingsError) {
+                    settingsError.textContent = errors.join(' ');
+                    settingsError.classList.remove('hidden');
+                }
+                return;
+            }
+            // Save via Electron
+            if (window.electronAPI && typeof window.electronAPI.saveSettings === 'function') {
+                const res = await window.electronAPI.saveSettings({ maxItems, pollingMs });
+                if (!res || !res.ok) {
+                    if (settingsError) {
+                        settingsError.textContent = `Failed to save settings: ${res && res.error ? res.error : 'Unknown error'}`;
+                        settingsError.classList.remove('hidden');
+                    }
+                    return;
+                }
+                // Apply locally as well (renderer-side adjustments; main will also broadcast)
+                this.applySettings(res.settings || { maxItems, pollingMs });
+                this.render();
+            } else {
+                // Fallback: apply locally only
+                this.applySettings({ maxItems, pollingMs });
+                this.render();
+            }
+            closeModal();
+        });
+
+        // Global keyboard shortcuts
+        const isModalOpen = () => (settingsModal && !settingsModal.classList.contains('hidden')) || (this.viewerModal && !this.viewerModal.classList.contains('hidden'));
+        const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+        document.addEventListener('keydown', (e) => {
+            // ESC closes whichever modal is open
+            if (e.key === 'Escape' && isModalOpen()) {
+                e.preventDefault();
+                if (this.viewerModal && !this.viewerModal.classList.contains('hidden')) {
+                    this.closeViewer();
+                } else {
+                    closeModal();
+                }
+                return;
+            }
+            // Ctrl/Cmd + F focuses search
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                searchInput?.focus();
+                return;
+            }
+            // Ctrl/Cmd + P opens settings
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+                e.preventDefault();
+                openModal();
+                // focus first input
+                maxItemsInput?.focus();
+                return;
+            }
+            // Ctrl/Cmd + S saves settings if modal is open
+            if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
+                if (settingsModal && !settingsModal.classList.contains('hidden')) {
+                    e.preventDefault();
+                    settingsSaveBtn?.click();
+                }
+                // Save in viewer edit mode
+                if (this.viewer && this.viewer.editing) {
+                    e.preventDefault();
+                    this.handleViewerSave();
+                }
+                return;
+            }
+            // Arrow Up/Down to increment/decrement numeric inputs when focused
+            const active = document.activeElement;
+            if (active && (active === maxItemsInput || active === pollingMsInput)) {
+                const step = Number(active.step || 1) || 1;
+                const min = Number(active.min || '');
+                const max = Number(active.max || '');
+                if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const next = (Number(active.value || 0) || 0) + step;
+                    active.value = String(isNaN(max) ? next : clamp(next, isNaN(min) ? -Infinity : min, max));
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = (Number(active.value || 0) || 0) - step;
+                    active.value = String(isNaN(min) ? next : clamp(next, min, isNaN(max) ? Infinity : max));
+                }
+            }
+        });
     }
+
     clearHistory() {
-        localStorage.removeItem('clipboardHistory');
         this.lruCache = new LRUCache(this.settings.maxItems);
         this.trie = new Trie();
         this.hashMap.clear();
         this.isSelecting = false;
         this.selectedItems.clear();
+        // Persist empty history to Electron store (and localStorage fallback)
+        this.persistHistory();
         this.render();
     }
+
     copySelected() {
         const selectedContent = [...this.selectedItems].map(id => {
             const item = this.lruCache.get(id);
             return item ? item.originalContent : '';
         }).join('\n\n');
-        navigator.clipboard.writeText(selectedContent);
+        if (window.electronAPI && typeof window.electronAPI.copyToClipboard === 'function') {
+            window.electronAPI.copyToClipboard(selectedContent);
+        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(selectedContent);
+        }
         this.showToast('Copied selected items to clipboard!');
         this.isSelecting = false;
         this.selectedItems.clear();
         this.render();
     }
+
     getFilteredAndSortedItems() {
         let items = this.lruCache.getAll();
-        
-        // Apply search
+
+        // Apply search (Trie prefix OR substring match)
         if (this.searchQuery) {
-            const searchIds = this.trie.search(this.searchQuery);
-            items = items.filter(item => searchIds.includes(item.id));
+            const q = this.searchQuery.toLowerCase();
+            const searchIds = new Set(this.trie.search(q));
+            items = items.filter(item => searchIds.has(item.id) || (item.originalContent || '').toLowerCase().includes(q));
         }
         // Apply filter
         if (this.currentFilter !== 'all') {
@@ -197,21 +476,31 @@ class ClipboardManager {
             const scoreB = (b.frequency || 1) * 0.3 + (b.lastUsed / Date.now()) * 0.7;
             return scoreB - scoreA;
         });
+        // Update search meta
+        try {
+            const searchMeta = document.getElementById('searchMeta');
+            if (searchMeta) {
+                if (this.searchQuery) searchMeta.textContent = `${items.length} result${items.length === 1 ? '' : 's'}`;
+                else searchMeta.textContent = '';
+            }
+        } catch {}
         return items;
     }
+
     render() {
         const container = document.getElementById('clipboardList');
         const items = this.getFilteredAndSortedItems();
         if (items.length === 0) {
             container.innerHTML = `<div class="no-items-message">
-                <i data-feather="clipboard" class="icon"></i>
-                <h3>No items found</h3>
-                <p>Paste something to get started!</p>
+                <i data-feather="alert-triangle" class="icon"></i>
+                <h3>Your history is empty</h3>
+                <p>Items you copy will appear here. Try adding an item from your clipboard.</p>
             </div>`;
             feather.replace();
             this.updateStats();
             return;
         }
+        const q = (this.searchQuery || '').trim();
         container.innerHTML = items.map(item => {
             const timeAgo = this.formatTimeAgo(item.timestamp);
             const isSelected = this.selectedItems.has(item.id);
@@ -219,7 +508,7 @@ class ClipboardManager {
             const checkboxHtml = this.isSelecting ?
                 `<input type="checkbox" class="item-checkbox" data-id="${item.id}" ${isSelected ? 'checked' : ''}>`
                 : '';
-            
+
             return `
             <div class="clipboard-item ${selectedClass}" data-id="${item.id}">
                 ${checkboxHtml}
@@ -229,11 +518,18 @@ class ClipboardManager {
                         <div>${timeAgo}</div>
                         <div>Used ${item.frequency}x</div>
                     </div>
+                    <div class="item-actions">
+                        <button class="btn btn-ghost btn-view" data-id="${item.id}"><i data-feather="eye" class="btn-icon"></i><span>View</span></button>
+                    </div>
                 </div>
-                <pre class="item-content">${this.escapeHtml(item.originalContent)}</pre>
+                <pre class="item-content">${this.escapeAndHighlight(item.originalContent, q)}</pre>
             </div>
             `;
         }).join('');
+        // Render feather icons inside newly created elements
+        if (typeof feather !== 'undefined' && feather.replace) {
+            try { feather.replace(); } catch (_) {}
+        }
         // Add event listeners for new items
         container.querySelectorAll('.clipboard-item').forEach(el => {
             el.addEventListener('click', (event) => {
@@ -246,27 +542,195 @@ class ClipboardManager {
                     }
                     this.render(); // Re-render to update the visual state
                 } else {
+                    // If the click is on the View button, don't copy to clipboard
+                    const target = event.target.closest?.('.btn-view');
+                    if (target) return; 
                     const item = this.lruCache.get(id); // Use get to mark as recently used
                     if (item) {
-                        navigator.clipboard.writeText(item.originalContent);
+                        if (window.electronAPI && typeof window.electronAPI.copyToClipboard === 'function') {
+                            window.electronAPI.copyToClipboard(item.originalContent);
+                        } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(item.originalContent);
+                        }
                         item.lastUsed = Date.now();
                         item.frequency++;
                         this.lruCache.put(id, item); // Update item in cache
-                        this.saveToStorage();
+                        this.persistHistory();
                         this.showToast('Copied to clipboard!');
                         this.render(); // Re-render to show updated frequency and order
                     }
                 }
             });
         });
-        
+        // View buttons
+        container.querySelectorAll('.btn-view').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.getAttribute('data-id');
+                this.openViewer(id);
+            });
+        });
+
         this.updateStats();
         this.updateCopySelectedBtnState();
     }
-    
+
+    // Rebuild search/hash indexes after edits/deletes
+    rebuildIndexes() {
+        const items = this.lruCache.getAll();
+        this.trie = new Trie();
+        this.hashMap.clear();
+        items.forEach(item => {
+            this.trie.insert(item.originalContent, item.id);
+            this.hashMap.set(this.hash(item.originalContent), item.id);
+        });
+    }
+
+    // ===== Viewer modal logic =====
+    openViewer(id) {
+        const item = this.lruCache.get(id);
+        if (!item) return;
+        this.viewer = { open: true, itemId: id, editing: false };
+        if (this.viewerReadOnly) this.viewerReadOnly.textContent = item.originalContent || '';
+        if (this.viewerEditor) {
+            this.viewerEditor.value = item.originalContent || '';
+            this.viewerEditor.classList.add('hidden');
+            this.viewerEditor.readOnly = false;
+        }
+        if (this.viewerSaveBtn) this.viewerSaveBtn.disabled = true;
+        if (this.viewerRevertBtn) this.viewerRevertBtn.classList.add('hidden');
+        if (this.viewerModal) this.viewerModal.classList.remove('hidden');
+        if (typeof feather !== 'undefined' && feather.replace) {
+            try { feather.replace(); } catch (_) {}
+        }
+        // Block copy/cut/paste when not editing
+        this.installViewerClipboardBlockers();
+    }
+
+    closeViewer() {
+        this.viewer = { open: false, itemId: null, editing: false };
+        if (this.viewerModal) this.viewerModal.classList.add('hidden');
+        this.removeViewerClipboardBlockers();
+    }
+
+    enterViewerEdit() {
+        if (!this.viewer || !this.viewer.open) return;
+        this.viewer.editing = true;
+        if (this.viewerReadOnly) this.viewerReadOnly.classList.add('hidden');
+        if (this.viewerEditor) {
+            this.viewerEditor.classList.remove('hidden');
+            this.viewerEditor.focus();
+            this.viewerEditor.setSelectionRange(0, 0);
+        }
+        if (this.viewerSaveBtn) this.viewerSaveBtn.disabled = true;
+        if (this.viewerRevertBtn) this.viewerRevertBtn.classList.remove('hidden');
+        // Allow clipboard in edit mode
+        this.removeViewerClipboardBlockers();
+    }
+
+    onViewerInput() {
+        if (!this.viewer || !this.viewer.open) return;
+        if (this.viewerSaveBtn) this.viewerSaveBtn.disabled = false;
+    }
+
+    handleViewerSave() {
+        if (!this.viewer || !this.viewer.open || !this.viewer.editing) return;
+        const id = this.viewer.itemId;
+        const item = this.lruCache.get(id);
+        if (!item) return;
+        const newText = this.viewerEditor ? String(this.viewerEditor.value || '') : item.originalContent;
+        const prevText = item.originalContent;
+        if (newText === prevText) {
+            // Nothing changed
+            this.exitViewerEdit(false);
+            return;
+        }
+        // Backup original on first modification
+        if (!item.originalBackup) item.originalBackup = prevText;
+        // Update content
+        item.originalContent = newText;
+        item.lastUsed = Date.now();
+        this.lruCache.put(id, item);
+        // Rebuild indexes due to content change and persist
+        this.rebuildIndexes();
+        this.persistHistory();
+        this.exitViewerEdit(true);
+        this.render();
+        this.showToast('Item saved.');
+    }
+
+    handleViewerRevert() {
+        if (!this.viewer || !this.viewer.open) return;
+        const id = this.viewer.itemId;
+        const item = this.lruCache.get(id);
+        if (!item) return;
+        if (item.originalBackup) {
+            item.originalContent = item.originalBackup;
+            delete item.originalBackup;
+            this.lruCache.put(id, item);
+            this.rebuildIndexes();
+            this.persistHistory();
+            // Reset editor to original
+            if (this.viewerEditor) this.viewerEditor.value = item.originalContent;
+            if (this.viewerReadOnly) this.viewerReadOnly.textContent = item.originalContent;
+            this.showToast('Reverted to original.');
+        } else if (this.viewerEditor) {
+            // If no backup (edit session before save), just reset editor value
+            const current = item.originalContent || '';
+            this.viewerEditor.value = current;
+        }
+        // Keep editing state but disable Save until user changes again
+        if (this.viewerSaveBtn) this.viewerSaveBtn.disabled = true;
+    }
+
+    handleViewerDelete() {
+        if (!this.viewer || !this.viewer.open) return;
+        const id = this.viewer.itemId;
+        // Remove from cache by rebuilding without this id
+        const remaining = this.lruCache.getAll().filter(x => x.id !== id);
+        this.lruCache = new LRUCache(this.settings.maxItems);
+        remaining.forEach(x => this.lruCache.put(x.id, x));
+        this.rebuildIndexes();
+        this.persistHistory();
+        this.closeViewer();
+        this.render();
+        this.showToast('Item deleted.');
+    }
+
+    exitViewerEdit(updated) {
+        this.viewer.editing = false;
+        const item = this.lruCache.get(this.viewer.itemId);
+        if (this.viewerReadOnly && item) {
+            this.viewerReadOnly.textContent = item.originalContent || '';
+            this.viewerReadOnly.classList.remove('hidden');
+        }
+        if (this.viewerEditor) this.viewerEditor.classList.add('hidden');
+        if (this.viewerSaveBtn) this.viewerSaveBtn.disabled = true;
+        if (this.viewerRevertBtn) this.viewerRevertBtn.classList.add('hidden');
+        // Block clipboard ops again in read-only
+        this.installViewerClipboardBlockers();
+    }
+
+    installViewerClipboardBlockers() {
+        // Prevent copy/cut/paste when viewer open and not editing
+        this._viewerClipboardHandler = (e) => {
+            if (this.viewer && this.viewer.open && !this.viewer.editing) {
+                e.preventDefault();
+            }
+        };
+        ['copy','cut','paste'].forEach(type => document.addEventListener(type, this._viewerClipboardHandler, { capture: true }));
+    }
+
+    removeViewerClipboardBlockers() {
+        if (this._viewerClipboardHandler) {
+            ['copy','cut','paste'].forEach(type => document.removeEventListener(type, this._viewerClipboardHandler, { capture: true }));
+            this._viewerClipboardHandler = null;
+        }
+    }
+
     updateStats() {
         const totalItems = this.lruCache.size();
-        const storageUsed = (localStorage.getItem('clipboardHistory') || '').length;
+        const storageUsed = JSON.stringify(this.lruCache.getAll()).length;
         document.getElementById('totalItems').textContent = totalItems;
         document.getElementById('storageUsed').textContent = (storageUsed / 1024).toFixed(2) + ' KB';
     }
@@ -321,6 +785,42 @@ class ClipboardManager {
             toast.classList.remove('active');
         }, 3000);
     }
+    
+    setTheme(theme) {
+        if (theme === 'africa') {
+            document.documentElement.setAttribute('data-theme', 'africa');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+        
+        // Save theme preference
+        if (window.electronAPI && typeof window.electronAPI.saveSettings === 'function') {
+            window.electronAPI.saveSettings({ theme: theme });
+        } else {
+            localStorage.setItem('theme', theme);
+        }
+    }
+    
+    loadTheme() {
+        // Load saved theme preference
+        let savedTheme = 'granular'; // default
+        
+        if (window.electronAPI && typeof window.electronAPI.getSettings === 'function') {
+            window.electronAPI.getSettings().then(result => {
+                if (result && result.ok && result.settings && result.settings.theme) {
+                    this.setTheme(result.settings.theme);
+                    const themeSelect = document.getElementById('themeSelect');
+                    if (themeSelect) themeSelect.value = result.settings.theme;
+                }
+            });
+        } else {
+            savedTheme = localStorage.getItem('theme') || 'granular';
+            this.setTheme(savedTheme);
+            const themeSelect = document.getElementById('themeSelect');
+            if (themeSelect) themeSelect.value = savedTheme;
+        }
+    }
+    
     escapeHtml(unsafe) {
         return unsafe
              .replace(/&/g, "&amp;")
@@ -328,6 +828,18 @@ class ClipboardManager {
              .replace(/>/g, "&gt;")
              .replace(/"/g, "&quot;")
              .replace(/'/g, "&#039;");
+    }
+    escapeAndHighlight(text, query) {
+        if (!text) return '';
+        const escaped = this.escapeHtml(String(text));
+        if (!query) return escaped;
+        try {
+            const q = String(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(q, 'gi');
+            return escaped.replace(re, (m) => `<mark class="hl">${m}</mark>`);
+        } catch {
+            return escaped;
+        }
     }
 }
 // Section 3: DOM Initialization

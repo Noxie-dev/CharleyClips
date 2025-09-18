@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* Theme system using CSS custom properties */
+:root {
+  /* Granular Dark theme (default) */
+  --theme-bg: #0D1117;
+  --theme-container: #161B22;
+  --theme-surface: #21262D;
+  --theme-primary: #58A6FF;
+  --theme-text: #C9D1D9;
+  --theme-text-muted: #8B949E;
+  --theme-border: #30363D;
+  --theme-success: #22c55e;
+  --theme-warning: #f59e0b;
+  --theme-danger: #ef4444;
+  --theme-info: #3b82f6;
+}
+
+/* Africa Dark theme */
+[data-theme="africa"] {
+  --theme-bg: #2d3133;
+  --theme-container: #393D3F;
+  --theme-surface: #505456;
+  --theme-primary: #A5787A;
+  --theme-text: #F6F0ED;
+  --theme-text-muted: #9ca3af;
+  --theme-border: #505456;
+  --theme-success: #22c55e;
+  --theme-warning: #f59e0b;
+  --theme-danger: #ef4444;
+  --theme-info: #3b82f6;
+}
+
+/* Custom utility classes for theme colors */
+.bg-theme-primary { background-color: var(--theme-bg); }
+.bg-theme-container { background-color: var(--theme-container); }
+.bg-theme-surface { background-color: var(--theme-surface); }
+.bg-theme-accent { background-color: var(--theme-primary); }
+.text-theme-primary { color: var(--theme-text); }
+.text-theme-muted { color: var(--theme-text-muted); }
+.border-theme { border-color: var(--theme-border); }
+.bg-theme-success { background-color: var(--theme-success); }
+.bg-theme-warning { background-color: var(--theme-warning); }
+.bg-theme-danger { background-color: var(--theme-danger); }
+.bg-theme-info { background-color: var(--theme-info); }
+
+/* Focus ring utilities */
+.focus\:ring-theme-accent:focus { 
+  --tw-ring-color: var(--theme-primary); 
+  --tw-ring-opacity: 0.5;
+}
+
+/* Divide utilities */
+.divide-theme > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--theme-border);
+}
+
+/* Africa theme specific styles */
+[data-theme="africa"] {
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: #505456 #393D3F;
+}
+
+[data-theme="africa"] ::-webkit-scrollbar {
+  width: 8px;
+}
+
+[data-theme="africa"] ::-webkit-scrollbar-track {
+  background: #393D3F;
+}
+
+[data-theme="africa"] ::-webkit-scrollbar-thumb {
+  background: #505456;
+  border-radius: 4px;
+}
+
+[data-theme="africa"] ::-webkit-scrollbar-thumb:hover {
+  background: #A5787A;
+}
+
+/* Button hover effects for Africa theme */
+[data-theme="africa"] .btn-primary:hover {
+  background-color: rgba(165, 120, 122, 0.8);
+}
+
+[data-theme="africa"] .btn-select:hover {
+  background-color: rgba(59, 130, 246, 0.8);
+}
+
+[data-theme="africa"] .btn-copy-selected:hover {
+  background-color: rgba(34, 197, 94, 0.8);
+}
+
+[data-theme="africa"] .btn-clear:hover {
+  background-color: rgba(239, 68, 68, 0.8);
+}
+
+/* Filter button styles for Africa theme */
+[data-theme="africa"] .filter-btn.active {
+  background-color: #A5787A;
+  color: #2d3133;
+  font-weight: 700;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* Toast styles for Africa theme */
+[data-theme="africa"] .toast {
+  background-color: #A5787A;
+  color: #F6F0ED;
+}

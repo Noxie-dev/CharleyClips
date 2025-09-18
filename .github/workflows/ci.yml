@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start app (headless)
+        run: |
+          nohup xvfb-run -a npm run start:headless > app.log 2>&1 & echo $! > app.pid
+        env:
+          NODE_ENV: test
+
+      - name: Wait for app to be ready
+        run: |
+          for i in {1..40}; do
+            if node cli.js status; then
+              echo "App is ready"; exit 0
+            fi
+            sleep 0.25
+          done
+          echo "App did not become ready in time"; cat app.log; exit 1
+
+      - name: Exercise CLI
+        run: |
+          node cli.js add "Hello world"
+          node cli.js list -l 5
+          node cli.js search Hello
+          node cli.js clear
+
+      - name: Stop app
+        run: |
+          node cli.js stop || true
+          if [ -f app.pid ]; then
+            kill "$(cat app.pid)" || true
+          fi
+
+      - name: Show logs on failure
+        if: failure()
+        run: cat app.log || true

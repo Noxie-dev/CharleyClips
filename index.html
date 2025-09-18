@@ -37,58 +37,157 @@
 
     <div id="app" class="app-container">
         <!-- Header -->
-        <div class="header">
-            <h1 class="text-3xl font-bold mb-2 md:mb-0">Clipboard History</h1>
-            <div class="stats">
-                <span>Items: <strong id="totalItems">0</strong></span>
-                <span>|</span>
-                <span>Storage: <strong id="storageUsed">0 KB</strong></strong></span>
+        <header class="header">
+            <div class="header-left">
+                <h1 class="header-title">Clipboard History Pro</h1>
+                <p class="header-subtitle">Your personal clipboard manager.</p>
             </div>
-            <div class="user-id">User ID: <span id="userIdDisplay">Loading...</span></div>
-        </div>
+            <div class="header-right">
+                <div class="stat-card">
+                    <div class="stat-label">Total Items</div>
+                    <div class="stat-value" id="totalItems">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Storage Used</div>
+                    <div class="stat-value" id="storageUsed">0.00 KB</div>
+                </div>
+                <div class="theme-card">
+                    <label class="theme-label">Theme</label>
+                    <select id="themeSelect" class="theme-select">
+                        <option value="granular">Granular Dark (Surbaburn Privilege)</option>
+                        <option value="africa">Africa Dark (Loadshedding)</option>
+                    </select>
+                </div>
+            </div>
+        </header>
 
         <!-- Controls -->
-        <div class="controls-grid">
-            <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search history..." class="search-input">
-                <i data-feather="search" class="search-icon"></i>
+        <div class="controls-section">
+            <div class="paste-section">
+                <textarea id="pasteTextarea" placeholder="Paste content here to add manually..." class="paste-textarea" rows="2"></textarea>
+                <div class="paste-buttons">
+                    <button id="addItemBtn" class="btn btn-primary">
+                        Add Item
+                    </button>
+                    <button id="pasteBtn" class="btn btn-secondary">
+                        Paste from Clipboard
+                    </button>
+                </div>
             </div>
-            <div class="buttons-container">
-                 <button id="pasteBtn" class="btn btn-primary">
-                    <i data-feather="plus-circle" class="btn-icon"></i>
-                    <span>Paste</span>
-                </button>
-                 <button id="selectBtn" class="btn btn-select">
-                    <i data-feather="check-square" class="btn-icon"></i>
-                    <span>Select</span>
-                </button>
-                <button id="copySelectedBtn" class="btn btn-copy-selected hidden-btn">
-                    <i data-feather="copy" class="btn-icon"></i>
-                    <span>Copy Selected</span>
-                </button>
-                <button id="clearBtn" class="btn btn-clear">
-                    <i data-feather="trash-2" class="btn-icon"></i>
-                </button>
+            
+            <div class="search-filter-row">
+                <div class="search-container">
+                    <i data-feather="search" class="search-icon"></i>
+                    <input type="text" id="searchInput" placeholder="Search history..." class="search-input">
+                </div>
+                <div class="filter-buttons">
+                    <button class="filter-btn active" data-filter="all">
+                        <span class="filter-icon">.*</span>
+                        All
+                    </button>
+                    <button class="filter-btn" data-filter="text">
+                        <i data-feather="type" class="filter-icon"></i>
+                        Text
+                    </button>
+                    <button class="filter-btn" data-filter="url">
+                        <i data-feather="link" class="filter-icon"></i>
+                        URLs
+                    </button>
+                    <button class="filter-btn" data-filter="code">
+                        <i data-feather="code" class="filter-icon"></i>
+                        Code
+                    </button>
+                </div>
             </div>
         </div>
 
-        <!-- Filter Buttons -->
-        <div id="filter-buttons" class="filter-container">
-            <button class="filter-btn active" data-filter="all">All</button>
-            <button class="filter-btn" data-filter="text">Text</button>
-            <button class="filter-btn" data-filter="url">URLs</button>
-            <button class="filter-btn" data-filter="code">Code</button>
-        </div>
 
-        <!-- Clipboard List -->
-        <div id="clipboardList" class="clipboard-list">
-            <!-- Items will be dynamically inserted here -->
-        </div>
+        <!-- Main Content -->
+        <main class="main-content">
+            <div id="clipboardList" class="clipboard-list">
+                <!-- Items will be dynamically inserted here -->
+            </div>
+        </main>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <button id="selectBtn" class="btn btn-select">
+                <i data-feather="check-square" class="btn-icon"></i>
+                <span>Select</span>
+            </button>
+            <button id="copySelectedBtn" class="btn btn-copy-selected hidden-btn">
+                <i data-feather="copy" class="btn-icon"></i>
+                <span>Copy Selected</span>
+            </button>
+            <button id="clearBtn" class="btn btn-clear">
+                <i data-feather="trash-2" class="btn-icon"></i>
+                <span>Clear History</span>
+            </button>
+        </footer>
     </div>
 
     <!-- Toast Notification -->
     <div id="toast" class="toast">
         Item copied to clipboard!
+    </div>
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal-overlay hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button id="settingsCloseBtn" class="icon-btn" aria-label="Close settings">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label for="maxItemsInput">Max items</label>
+                    <input type="number" id="maxItemsInput" min="1" max="10000" step="1" />
+                </div>
+                <div class="form-row">
+                    <label for="pollingMsInput">Polling interval (ms)</label>
+                    <input type="number" id="pollingMsInput" min="200" step="100" />
+                </div>
+                <div id="settingsError" class="settings-error hidden"></div>
+            </div>
+            <div class="modal-actions">
+                <button id="settingsCancelBtn" class="btn btn-clear">Cancel</button>
+                <button id="settingsSaveBtn" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+    <!-- Viewer Modal -->
+    <div id="viewerModal" class="modal-overlay hidden">
+        <div class="modal modal-large">
+            <div class="modal-header">
+                <h2 id="viewerTitle">Item Viewer</h2>
+                <button id="viewerCloseBtn" class="icon-btn" aria-label="Close viewer">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+            <div class="modal-body viewer-body">
+                <pre id="viewerReadOnly" class="viewer-content no-select"></pre>
+                <textarea id="viewerEditor" class="viewer-editor hidden" spellcheck="false"></textarea>
+            </div>
+            <div class="modal-actions viewer-actions">
+                <button id="viewerEditBtn" class="btn btn-primary">
+                    <i data-feather="edit-2" class="btn-icon"></i>
+                    <span>Edit</span>
+                </button>
+                <button id="viewerSaveBtn" class="btn btn-select" disabled>
+                    <i data-feather="save" class="btn-icon"></i>
+                    <span>Save</span>
+                </button>
+                <button id="viewerRevertBtn" class="btn hidden">
+                    <i data-feather="rotate-ccw" class="btn-icon"></i>
+                    <span>Revert to Original</span>
+                </button>
+                <button id="viewerDeleteBtn" class="btn btn-clear" style="margin-left:auto;">
+                    <i data-feather="trash-2" class="btn-icon"></i>
+                    <span>Delete</span>
+                </button>
+            </div>
+        </div>
     </div>
     <script src="app.js"></script>
 </body>
