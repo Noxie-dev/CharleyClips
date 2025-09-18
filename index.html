@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clipboard History Pro</title>
+    <!-- Link to the new style.css file -->
+    <link rel="stylesheet" href="styles.css">
+    <!-- Feather Icons for UI elements -->
+    <script src="https://unpkg.com/feather-icons"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, query, orderBy, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the canvas environment
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        window.firebaseApp = initializeApp(firebaseConfig);
+        window.auth = getAuth(window.firebaseApp);
+        window.db = getFirestore(window.firebaseApp);
+        window.userId = null;
+        
+        onAuthStateChanged(window.auth, (user) => {
+            if (user) {
+                window.userId = user.uid;
+            } else {
+                signInAnonymously(window.auth);
+            }
+        });
+    </script>
+</head>
+<body>
+
+    <div id="app" class="app-container">
+        <!-- Header -->
+        <div class="header">
+            <h1 class="text-3xl font-bold mb-2 md:mb-0">Clipboard History</h1>
+            <div class="stats">
+                <span>Items: <strong id="totalItems">0</strong></span>
+                <span>|</span>
+                <span>Storage: <strong id="storageUsed">0 KB</strong></strong></span>
+            </div>
+            <div class="user-id">User ID: <span id="userIdDisplay">Loading...</span></div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls-grid">
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search history..." class="search-input">
+                <i data-feather="search" class="search-icon"></i>
+            </div>
+            <div class="buttons-container">
+                 <button id="pasteBtn" class="btn btn-primary">
+                    <i data-feather="plus-circle" class="btn-icon"></i>
+                    <span>Paste</span>
+                </button>
+                 <button id="selectBtn" class="btn btn-select">
+                    <i data-feather="check-square" class="btn-icon"></i>
+                    <span>Select</span>
+                </button>
+                <button id="copySelectedBtn" class="btn btn-copy-selected hidden-btn">
+                    <i data-feather="copy" class="btn-icon"></i>
+                    <span>Copy Selected</span>
+                </button>
+                <button id="clearBtn" class="btn btn-clear">
+                    <i data-feather="trash-2" class="btn-icon"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Filter Buttons -->
+        <div id="filter-buttons" class="filter-container">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="text">Text</button>
+            <button class="filter-btn" data-filter="url">URLs</button>
+            <button class="filter-btn" data-filter="code">Code</button>
+        </div>
+
+        <!-- Clipboard List -->
+        <div id="clipboardList" class="clipboard-list">
+            <!-- Items will be dynamically inserted here -->
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        Item copied to clipboard!
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
