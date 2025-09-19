@@ -121,6 +121,76 @@ charley search "keyword"
 charley clear
 ```
 
+#### CLI Help
+
+You can view a comprehensive help screen that lists all commands, options, and examples:
+
+```bash
+# Global help
+charley --help
+charley help
+
+# Help for a specific command
+charley help list
+charley help config
+```
+
+Examples you will find in help:
+
+```bash
+# Start the app with GUI
+charley start
+
+# Start in the background (no window)
+charley start --headless
+
+# Filter and limit results
+charley list --filter url --limit 5
+
+# Search your history
+charley search "keyword"
+
+# Configuration commands
+charley config get
+charley config get port
+charley config set port 30444
+charley config path
+charley config export
+charley config import '{"port":30444,"maxHistoryItems":200}'
+```
+
+#### Command Aliases
+
+For convenience, several commands have short aliases:
+
+- `start` → `up`
+- `show` → `open`
+- `hide` → `close`
+- `list` → `ls`
+- `search` → `find`
+- `clear` → `purge`
+- `status` → `st`
+- `stop` → `down`
+- `health` → `hc`
+
+Quick examples using aliases:
+
+```bash
+charley up --headless
+charley ls -f url -l 5
+charley find "api"
+charley st
+charley down
+```
+
+#### Version and Help Flags
+
+- Show version: `charley --version` or `charley -V`
+- Show global help: `charley --help` or `charley help`
+- Show command help: `charley help <command>`
+
+Note: CLI output uses colors for readability when supported by your terminal.
+
 ### Advanced: Port Configuration
 
 If port `30303` is in use on your machine, you can change the port without code changes using the `CHARLEY_PORT` environment variable. The main app and CLI both respect this variable.
