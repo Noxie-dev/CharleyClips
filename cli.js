@@ -4,13 +4,22 @@ const net = require('net');
 const { spawn } = require('child_process');
 const path = require('path');
 
-const PORT = 30303;
+const PORT = (function() {
+    const envPort = parseInt(process.env.CHARLEY_PORT || '', 10);
+    return Number.isInteger(envPort) ? envPort : 30303;
+})();
 const HOST = '127.0.0.1';
 
 function sendCommand(command) {
     return new Promise((resolve, reject) => {
         const client = new net.Socket();
-        
+
+        // General timeout for the entire operation
+        const operationTimeout = setTimeout(() => {
+            client.destroy(); // Clean up the socket
+            reject(new Error('Operation timed out. The main application may be unresponsive.'));
+        }, 8000); // 8-second timeout for the whole process
+
         client.connect(PORT, HOST, () => {
             client.write(JSON.stringify(command));
         });
@@ -21,6 +30,7 @@ function sendCommand(command) {
         });
 
         client.on('close', () => {
+            clearTimeout(operationTimeout); // Success, clear the timeout
             try {
                 const response = JSON.parse(responseData);
                 if (response.status === 'ok') {
@@ -29,14 +39,15 @@ function sendCommand(command) {
                     reject(new Error(response.message || 'Command failed'));
                 }
             } catch (e) {
-                 const errorMessage = `Failed to parse response from app. Is it running?\nRaw response: ${responseData}`;
-                 reject(new Error(errorMessage));
+                const errorMessage = `Failed to parse response from app. Is it running?\nRaw response: ${responseData}`;
+                reject(new Error(errorMessage));
             }
         });
 
         client.on('error', (err) => {
+            clearTimeout(operationTimeout); // Error, clear the timeout
             if (err.code === 'ECONNREFUSED') {
-                reject(new Error('Application not running. Please start it with `clipboard-history start`.'));
+                reject(new Error('Application not running. Please start it with `npm start` (GUI) or `charley start` (background).'));
             } else {
                 reject(err);
             }
@@ -55,8 +66,8 @@ async function isAppRunning() {
 
 
 program
-    .name('clipboard-history')
-    .description('CLI for Clipboard History Pro')
+    .name('charley')
+    .description('Charley Clips CLI')
     .version('1.0.0');
 
 program
@@ -86,7 +97,7 @@ program
         console.log(`Application started ${options.headless ? 'in headless mode' : ''}. PID: ${child.pid}`);
 
         // Wait until ready: poll status for up to ~5 seconds
-        const maxAttempts = 20;
+        const maxAttempts = 40; // up to ~10s
         const delayMs = 250;
         const wait = (ms) => new Promise(res => setTimeout(res, ms));
         for (let i = 0; i < maxAttempts; i++) {
@@ -98,7 +109,7 @@ program
                 await wait(delayMs);
             }
         }
-        console.warn('Application may not be ready yet. Try running `clipboard-history status` in a moment.');
+        console.warn('Application may not be ready yet. Try running `charley status` in a moment.');
     });
 
 program
@@ -169,6 +180,92 @@ program
         try {
             await sendCommand({ action: 'stop' });
             console.log('Application stopping...');
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
+
+// Config subcommands
+const configCmd = program.command('config').description('Manage Charley Clips configuration');
+
+configCmd
+    .command('get [key]')
+    .description('Get entire config or a single key')
+    .action(async (key) => {
+        try {
+            const payload = { action: 'config_get' };
+            if (key) payload.key = key;
+            const value = await sendCommand(payload);
+            console.log(typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value));
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
+
+configCmd
+    .command('set <key> <value>')
+    .description('Set a config value (number, boolean, or string)')
+    .action(async (key, value) => {
+        try {
+            const result = await sendCommand({ action: 'config_set', key, value });
+            console.log(JSON.stringify(result, null, 2));
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
+
+configCmd
+    .command('path')
+    .description('Show the path to the config file')
+    .action(async () => {
+        try {
+            const info = await sendCommand({ action: 'config_path' });
+            console.log(info.path || info);
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
+
+configCmd
+    .command('export')
+    .description('Print the current configuration as JSON')
+    .action(async () => {
+        try {
+            const cfg = await sendCommand({ action: 'config_export' });
+            console.log(JSON.stringify(cfg, null, 2));
+        } catch (e) {
+            console.error(e.message);
+        }
+    });
+
+configCmd
+    .command('import <json>')
+    .description('Import configuration from a JSON string')
+    .action(async (jsonStr) => {
+        try {
+            const obj = JSON.parse(jsonStr);
+            const cfg = await sendCommand({ action: 'config_import', payload: obj });
+            console.log(JSON.stringify(cfg, null, 2));
+        } catch (e) {
+            console.error('Invalid JSON or import failed:', e.message);
+        }
+    });
+
+// Diagnostic: health command
+program
+    .command('health')
+    .description('Show health metrics from the running application')
+    .action(async () => {
+        try {
+            const info = await sendCommand({ action: 'health' });
+            console.log('Health check:');
+            console.log(`- Uptime (s): ${Math.round(info.uptime)}`);
+            console.log(`- Clipboard polling active: ${info.clipboardActive ? 'yes' : 'no'}`);
+            const mem = info.memory || {};
+            if (mem.rss) {
+                const mb = (bytes) => (bytes / (1024 * 1024)).toFixed(2);
+                console.log(`- Memory: rss=${mb(mem.rss)}MB heapTotal=${mb(mem.heapTotal)}MB heapUsed=${mb(mem.heapUsed)}MB`);
+            }
         } catch (e) {
             console.error(e.message);
         }

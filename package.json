@@ -1,22 +1,112 @@
 {
-  "name": "clipboard-history-pro",
+  "name": "charley-clips",
+  "productName": "Charley Clips",
   "version": "1.0.0",
-  "description": "A powerful, local-first clipboard manager designed to help you keep a record of everything you copy.",
+  "description": "A powerful, cross-platform clipboard manager with GUI and CLI interfaces",
   "main": "main.js",
+  "homepage": "https://github.com/yourusername/charley-clips",
+  "author": {
+    "name": "Your Name",
+    "email": "your.email@example.com"
+  },
   "scripts": {
     "start": "cross-env NODE_ENV=development electron .",
+    "start:prod": "cross-env NODE_ENV=production electron .",
     "start:headless": "electron . --headless",
-    "cli": "node cli.js"
+    "cli": "node cli.js",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "dist": "npm run build",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
   },
   "bin": {
-    "clipboard-history": "./cli.js"
+    "charley": "./cli.js"
+  },
+  "build": {
+    "appId": "com.yourcompany.charley-clips",
+    "productName": "Charley Clips",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "styles.css",
+      "logger.js",
+      "cli.js",
+      "Public/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "Public/charley-logo.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "^38.1.2"
+    "electron": "^38.1.2",
+    "electron-builder": "^24.13.3"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "electron-store": "^8.1.0"
+    "commander": "^12.1.0"
   }
 }

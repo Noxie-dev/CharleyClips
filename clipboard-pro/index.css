@@ -36,6 +36,7 @@
 .bg-theme-container { background-color: var(--theme-container); }
 .bg-theme-surface { background-color: var(--theme-surface); }
 .bg-theme-accent { background-color: var(--theme-primary); }
+.text-theme-accent { color: var(--theme-primary); }
 .text-theme-primary { color: var(--theme-text); }
 .text-theme-muted { color: var(--theme-text-muted); }
 .border-theme { border-color: var(--theme-border); }

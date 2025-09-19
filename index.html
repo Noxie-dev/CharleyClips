@@ -3,35 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Clipboard History Pro</title>
+    <title>Charley Clips</title>
     <!-- Link to the new style.css file -->
     <link rel="stylesheet" href="styles.css">
     <!-- Feather Icons for UI elements -->
     <script src="https://unpkg.com/feather-icons"></script>
-    
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, doc, query, orderBy, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Global variables provided by the canvas environment
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        window.firebaseApp = initializeApp(firebaseConfig);
-        window.auth = getAuth(window.firebaseApp);
-        window.db = getFirestore(window.firebaseApp);
-        window.userId = null;
-        
-        onAuthStateChanged(window.auth, (user) => {
-            if (user) {
-                window.userId = user.uid;
-            } else {
-                signInAnonymously(window.auth);
-            }
-        });
-    </script>
 </head>
 <body>
 
@@ -39,7 +15,7 @@
         <!-- Header -->
         <header class="header">
             <div class="header-left">
-                <h1 class="header-title">Clipboard History Pro</h1>
+                <h1 class="header-title">Charley Clips</h1>
                 <p class="header-subtitle">Your personal clipboard manager.</p>
             </div>
             <div class="header-right">
